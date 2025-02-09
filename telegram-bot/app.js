@@ -45,12 +45,27 @@ const client = new TelegramClient(new StringSession(sessionString), telegramApiI
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+    let conversationHistory = [
+        {
+            role: "user",
+            parts: [{ text: "Your name is Adan, male, age 28 years. Talk like a human, with friendly and informal tone." }]
+        }
+    ];
+
     async function getGeminiResponse(userMessage) {
         try {
+            conversationHistory.push({ role: "user", parts: [{ text: userMessage }] });
             const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-            const result = await model.generateContent(userMessage);
+            const chat = model.startChat({
+                history: conversationHistory,
+                generationConfig: {
+                    maxOutputTokens: 300,
+                }
+            });
+            const result = await chat.sendMessage(userMessage);
             const response = result.response.text();
 
+            conversationHistory.push({ role: "model", parts: [{ text: response }] });
             return response;
         } catch (error) {
             console.error("Error with Gemini API:", error);
