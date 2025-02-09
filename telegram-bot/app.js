@@ -1,13 +1,14 @@
-const { TelegramClient } = require("telegram");
+require('dotenv').config();
+const { Api, TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
-const input = require("input"); // npm install input
-const  { Api } = require("telegram");
+const input = require("input");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-const apiId = 24062141; // Replace with your API ID
-const apiHash = "de5e9f48f7748dd2355fba259df25b06"; // Replace with your API Hash
-const sessionString = "1BQANOTEuMTA4LjU2LjEyNwG7SXuxIp0P1edQ0ASdO68D9EsXmsQxyqbtmZ9m3lM7D8O4brVYDBp8UOb8m0M2tFo3VUi7ButzPOTSBm9Y2/j4HuydsojHsTPlmJXQCvZm9ffxckDlz+v6PE4r1Ca24ToCiFz6nP8xWy/boun8eARlcWZ2msLI/TjPZiUXT/EXvpP7WnD6QiIdIc9OIiENQHVQ6BeZ+OHLSL2wbAQps7VBMgKqWZpwDtxdWrBYg3ErlC38hFYMBw11HYx9lI93ItdmUHR6aVwfIDr8L2oMJxQyJVTmQMxCVXX/v35FqB4OtEddW5jNK4Ubih8winCgwcdSk9TYyYYbJLHbLlGO77KDJQ=="; // Leave empty if logging in for the first time
+const telegramApiId = +process.env.TELEGRAM_API_ID;
+const telegramApiHash = process.env.TELEGRAM_API_HASH;
+const sessionString = process.env.TELEGRAM_SESSION_STRING; // Leave empty if logging in for the first time
 
-const client = new TelegramClient(new StringSession(sessionString), apiId, apiHash, { connectionRetries: 5 });
+const client = new TelegramClient(new StringSession(sessionString), telegramApiId, telegramApiHash, { connectionRetries: 5 });
 
 (async () => {
     console.log("Starting Telegram Client...");
@@ -19,27 +20,89 @@ const client = new TelegramClient(new StringSession(sessionString), apiId, apiHa
     });
 
     console.log("You are logged in!");
-    console.log("Session string:", client.session.save()); // Save this to avoid logging in again
+    console.log("Session string:", client.session.save());
     console.log("Logged in as:", await client.getMe());
+
+    // const openai = new OpenAI({
+    //     apiKey: '',
+    // });
+
+    // async function getChatGPTResponse(userMessage) {
+    //     try {
+    //         const response = await openai.chat.completions.create({
+    //             model: "gpt-3.5-turbo", // Use "gpt-4" if available
+    //             messages: [{ role: "user", content: userMessage }],
+    //             temperature: 0.7,
+    //         });
+
+    //         return response.data.choices[0].message.content.trim();
+    //     } catch (error) {
+    //         console.error("Error with ChatGPT API:", error);
+    //         return "Sorry, couldn't process your request.";
+    //     }
+    // }
+
+
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+    async function getGeminiResponse(userMessage) {
+        try {
+            const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+            const result = await model.generateContent(userMessage);
+            const response = result.response.text();
+
+            return response;
+        } catch (error) {
+            console.error("Error with Gemini API:", error);
+            return "Sorry, couldn't process your request.";
+        }
+    }
 
     // Listen for new messages
     client.addEventHandler(async (update) => {
-        console.log("New event received!", update.className); // Debugging
-        
-    
-        if (update.className === "UpdateNewMessage" && update.message) {
+        console.log("New event received!", update.className);
+
+
+        if (update.className === "UpdateNewMessage" && update.message && !update.message.out) {
             console.log(update)
             const message = update.message;
-    
-            if (!message.out) { // Ignore outgoing messages
-                console.log(`Received: ${message.message}`);
-    
-                await client.sendMessage(message.peerId, {
-                    message: "Hi, Adan is busy, please wait for sometime."
-                });
-    
-                console.log("Auto-reply sent!");
+
+            console.log(`Received: ${message.message}`);
+
+            if (message.message.split(" ")[0].toLowerCase() != process.env.AI_PROMPT) {
+                return;
             }
+
+            const geminiResponse = await getGeminiResponse(message.message);
+
+            await client.sendMessage(message.peerId, {
+                message: geminiResponse,
+            });
+
+            console.log("Auto-reply sent!");
+        }
+        if (update.className === "UpdateShortMessage" && update.message && !update.out) {
+            console.log(update)
+            const message = update.message;
+
+            console.log(`Received: ${message}`);
+
+            if (message.split(" ")[0].toLowerCase() != process.env.AI_PROMPT) {
+                return;
+            }
+
+            const userId = update.userId.value;
+            const peerUser = new Api.InputPeerUser({ userId });
+
+            const geminiResponse = await getGeminiResponse(message);
+
+            console.log('RESPONSE FROM AI', geminiResponse)
+
+            await client.sendMessage(peerUser, {
+                message: geminiResponse,
+            });
+
+            console.log("Auto-reply sent!");
         }
     });
 })();
