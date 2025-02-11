@@ -3,6 +3,18 @@ const { Api, TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const input = require("input");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const express = require('express');
+const app = express();
+
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+    res.send('Telegram AI bot is running!');
+});
+
+app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+});
 
 const telegramApiId = +process.env.TELEGRAM_API_ID;
 const telegramApiHash = process.env.TELEGRAM_API_HASH;
@@ -44,20 +56,18 @@ const client = new TelegramClient(new StringSession(sessionString), telegramApiI
 
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
-    let conversationHistory = [
-        {
-            role: "user",
-            parts: [{ text: "Your name is Adan, male, age 28 years. Talk like a human, with friendly and informal tone." }]
-        }
-    ];
-
+    const model = genAI.getGenerativeModel({ 
+        model: "gemini-1.5-flash",
+        systemInstruction: process.env.GEMINI_SYSTEM_INSTRUCTION,
+    });
+    let chatHistory = [];
+    
     async function getGeminiResponse(userMessage) {
         try {
-            conversationHistory.push({ role: "user", parts: [{ text: userMessage }] });
-            const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+            chatHistory.push({ role: "user", parts: [{ text: userMessage }] });
+  
             const chat = model.startChat({
-                history: conversationHistory,
+                history: chatHistory,
                 generationConfig: {
                     maxOutputTokens: 300,
                 }
@@ -65,7 +75,9 @@ const client = new TelegramClient(new StringSession(sessionString), telegramApiI
             const result = await chat.sendMessage(userMessage);
             const response = result.response.text();
 
-            conversationHistory.push({ role: "model", parts: [{ text: response }] });
+            chatHistory.push({ role: "model", parts: [{ text: response }] });
+            //console.log('CHAT HISTORY',JSON.stringify(chatHistory, null, 2));
+
             return response;
         } catch (error) {
             console.error("Error with Gemini API:", error);
@@ -75,49 +87,37 @@ const client = new TelegramClient(new StringSession(sessionString), telegramApiI
 
     // Listen for new messages
     client.addEventHandler(async (update) => {
-        console.log("New event received!", update.className);
-
-
-        if (update.className === "UpdateNewMessage" && update.message && !update.message.out) {
-            console.log(update)
-            const message = update.message;
-
-            console.log(`Received: ${message.message}`);
-
-            if (message.message.split(" ")[0].toLowerCase() != process.env.AI_PROMPT) {
+        //console.log("New event received!", update.className);
+    
+        if (
+            (update.className === "UpdateNewMessage" && update.message && !update.message.out) ||
+            (update.className === "UpdateShortMessage" && update.message && !update.out)
+        ) {
+            //console.log(update);
+    
+            // Extract message text and user ID
+            const messageText = update.className === "UpdateNewMessage" ? update.message.message : update.message;
+            console.log(`Received: ${messageText}`);
+    
+            // Check if message starts with the AI prompt
+            if (messageText.split(" ")[0].toLowerCase() !== process.env.AI_PROMPT) {
                 return;
             }
-
-            const geminiResponse = await getGeminiResponse(message.message);
-
-            await client.sendMessage(message.peerId, {
-                message: geminiResponse,
-            });
-
-            console.log("Auto-reply sent!");
-        }
-        if (update.className === "UpdateShortMessage" && update.message && !update.out) {
-            console.log(update)
-            const message = update.message;
-
-            console.log(`Received: ${message}`);
-
-            if (message.split(" ")[0].toLowerCase() != process.env.AI_PROMPT) {
-                return;
+    
+            const geminiResponse = await getGeminiResponse(messageText);
+    
+            console.log("Response from AI:", geminiResponse);
+    
+            // Determine recipient
+            if (update.className === "UpdateNewMessage") {
+                await client.sendMessage(update.message.peerId, { message: geminiResponse });
+            } else if (update.className === "UpdateShortMessage") {
+                const userId = update.userId.value;
+                const peerUser = new Api.InputPeerUser({ userId });
+                await client.sendMessage(peerUser, { message: geminiResponse });
             }
-
-            const userId = update.userId.value;
-            const peerUser = new Api.InputPeerUser({ userId });
-
-            const geminiResponse = await getGeminiResponse(message);
-
-            console.log('RESPONSE FROM AI', geminiResponse)
-
-            await client.sendMessage(peerUser, {
-                message: geminiResponse,
-            });
-
+    
             console.log("Auto-reply sent!");
         }
-    });
+    });        
 })();
